@@ -11,19 +11,19 @@ body {
 
 .page {
   box-sizing: border-box;
-  width: min(760px, 100%);
+  width: min(460px, 100%);
   margin: 0 auto;
-  padding: 40px 24px 56px;
+  padding: 20px 16px 28px;
 }
 
-h1 { margin: 0 0 8px; font-size: 28px; }
-h2 { margin: 0 0 18px; font-size: 18px; }
+h1 { margin: 0 0 8px; font-size: 24px; }
+h2 { margin: 0 0 14px; font-size: 18px; }
 .intro, .help, .note { line-height: 1.55; color: #6e6e73; }
 .card, .note {
-  margin-top: 20px;
-  padding: 22px;
+  margin-top: 12px;
+  padding: 16px;
   border: 1px solid #d2d2d7;
-  border-radius: 14px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, .78);
 }
 label { display: grid; gap: 8px; margin-top: 16px; font-weight: 600; }
@@ -44,6 +44,18 @@ a { color: #06c; }
 .message { color: #176b2c; }
 .message.error { color: #c62828; }
 .status { color: #6e6e73; font-size: 13px; }
+.diagnostic-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.toggle-row { display: flex; grid-template-columns: auto 1fr; align-items: center; gap: 9px; margin-top: 0; font-weight: 500; }
+.toggle-row input { width: 16px; height: 16px; margin: 0; accent-color: #0071e3; }
+.toggle-row + .status { margin: 8px 0; }
+.diagnostics textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre;
+}
 .note { display: grid; gap: 8px; font-size: 13px; }
 code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 

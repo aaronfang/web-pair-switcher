@@ -45,6 +45,22 @@
         <p id="nativeStatus" class="status"></p>
       </section>
 
+      <section class="card diagnostics">
+        <h2>诊断记录</h2>
+        <label class="toggle-row">
+          <input id="debugMode" type="checkbox">
+          <span>收集调试日志</span>
+        </label>
+        <p id="debugModeStatus" class="status"></p>
+        <div class="diagnostic-actions">
+          <button id="refreshDiagnostics" type="button">刷新</button>
+          <button id="copyDiagnostics" type="button">复制记录</button>
+          <button id="clearDiagnostics" type="button">清空</button>
+        </div>
+        <textarea id="diagnosticLogs" readonly aria-label="诊断记录"></textarea>
+        <p id="diagnosticStatus" class="status" role="status"></p>
+      </section>
+
       <div class="actions">
         <button id="save" type="button">保存设置并请求网页权限</button>
         <a href="chrome://extensions/shortcuts" target="_blank" rel="noreferrer">设置 Chrome 内部快捷键</a>

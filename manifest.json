@@ -27,6 +27,7 @@
     }
   },
   "action": {
+    "default_popup": "options.html",
     "default_title": "网页双页切换器"
   }
 }

@@ -1,5 +1,7 @@
 const BASE_TITLE = "网页双页切换器";
 const NATIVE_HOST_NAME = "com.aaronfang.web_pair_switcher";
+const DIAGNOSTIC_LOG_KEY = "diagnosticLogs";
+const MAX_DIAGNOSTIC_LOGS = 300;
 const DEFAULT_SETTINGS = {
   targetA: { name: "抖音", pattern: "*://*.douyin.com/*" },
   targetB: { name: "哔哩哔哩", pattern: "*://*.bilibili.com/*" },
@@ -12,6 +14,11 @@ let lastToggleAt = 0;
 let lastToggleSource = "";
 let nativeHostError = "正在连接 macOS 常驻助手";
 let commandQueue = Promise.resolve();
+let diagnosticWriteQueue = Promise.resolve();
+let debugMode = false;
+const debugModeReady = chrome.storage.local.get("debugMode")
+  .then(({ debugMode: enabled }) => { debugMode = Boolean(enabled); })
+  .catch((error) => console.warn("Could not read diagnostic setting", error));
 
 chrome.runtime.onInstalled.addListener(async () => {
   const { switchSettings } = await chrome.storage.sync.get("switchSettings");
@@ -44,6 +51,36 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     sendResponse({ ok: true });
   } else if (message?.type === "getNativeHostStatus") {
     sendResponse({ connected: Boolean(nativePort), error: nativeHostError });
+  } else if (message?.type === "getDiagnosticLogs") {
+    chrome.storage.local.get(DIAGNOSTIC_LOG_KEY).then(({ diagnosticLogs }) => {
+      sendResponse({ logs: diagnosticLogs || [] });
+    }).catch((error) => sendResponse({ error: error.message || String(error) }));
+  } else if (message?.type === "clearDiagnosticLogs") {
+    chrome.storage.local.remove(DIAGNOSTIC_LOG_KEY).then(() => {
+      sendResponse({ ok: true });
+    }).catch((error) => sendResponse({ error: error.message || String(error) }));
+  } else if (message?.type === "getDebugMode") {
+    debugModeReady.then(() => sendResponse({ enabled: debugMode }));
+  } else if (message?.type === "setDebugMode") {
+    const enabled = Boolean(message.enabled);
+    const saveMode = async () => {
+      await debugModeReady;
+      const previousMode = debugMode;
+      if (!enabled) {
+        debugMode = false;
+        await diagnosticWriteQueue.catch(() => {});
+      }
+      try {
+        await chrome.storage.local.set({ debugMode: enabled });
+      } catch (error) {
+        debugMode = previousMode;
+        throw error;
+      }
+      debugMode = enabled;
+      if (enabled) await recordDiagnostic("debug.enabled");
+      sendResponse({ ok: true, enabled });
+    };
+    void saveMode().catch((error) => sendResponse({ error: error.message || String(error) }));
   }
   return true;
 });
@@ -63,9 +100,13 @@ function invokeToggle(source) {
   // The native helper and Chrome command can both see the same keystroke when
   // Chrome is focused. Deduplicate only across those two sources; repeated
   // right-Option events from the native helper are real user toggles.
-  if (source !== lastToggleSource && now - lastToggleAt < 500) return;
+  if (source !== lastToggleSource && now - lastToggleAt < 500) {
+    void recordDiagnostic("hotkey.deduplicated", { source, previousSource: lastToggleSource, ageMs: now - lastToggleAt });
+    return;
+  }
   lastToggleAt = now;
   lastToggleSource = source;
+  void recordDiagnostic("hotkey.accepted", { source });
   void enqueueCommand("toggle-player", source);
 }
 
@@ -83,7 +124,9 @@ function connectNativeHost() {
     const port = chrome.runtime.connectNative(NATIVE_HOST_NAME);
     nativePort = port;
     nativeHostError = "";
+    void recordDiagnostic("native.connected");
     port.onMessage.addListener((message) => {
+      void recordDiagnostic("native.message", { type: message?.type, message: message?.message });
       if (message?.type === "hotkey") invokeToggle("native-hotkey");
       if (message?.type === "configured") nativeHostError = "";
       if (message?.type === "permissionRequired") {
@@ -99,12 +142,14 @@ function connectNativeHost() {
       // runtime.lastError from being emitted for a missing native host.
       const error = chrome.runtime.lastError;
       nativeHostError = error?.message || "macOS 常驻助手已断开";
+      void recordDiagnostic("native.disconnected", { error: nativeHostError });
       if (nativePort === port) nativePort = null;
       scheduleNativeReconnect();
     });
     void sendNativeSettings(undefined, port);
   } catch (error) {
     nativeHostError = error?.message || "macOS 常驻助手不可用";
+    void recordDiagnostic("native.connect-error", { error: errorText(error) });
     nativePort = null;
     scheduleNativeReconnect();
   }
@@ -133,25 +178,40 @@ async function sendNativeSettings(settings, requestedPort = nativePort) {
   }
 }
 
-async function handleCommand(command, _source = "command") {
+async function handleCommand(command, source = "command") {
+  let stage = "read-settings";
+  const startedAt = Date.now();
+  await recordDiagnostic("switch.started", { command, source });
   try {
     const settings = await readSettings();
     const targets = [settings.targetA, settings.targetB];
+    stage = "find-target-tabs";
     const targetTabs = await tabsForTargets(targets);
+    await recordDiagnostic("switch.targets-found", {
+      targets: targetTabs.map(({ id, tabs }) => ({ id, count: tabs.length, tabIds: tabs.map((tab) => tab.id) }))
+    });
+    stage = "read-active-tab";
     const focusedWindow = await chrome.windows.getLastFocused();
     const [activeTab] = await chrome.tabs.query({
       active: true,
       windowId: focusedWindow.id
     });
     const activeTabs = await chrome.tabs.query({ active: true });
+    await recordDiagnostic("switch.active-state", {
+      focusedWindowId: focusedWindow.id,
+      focusedActiveTabId: activeTab?.id ?? null,
+      focusedActiveTabWindowId: activeTab?.windowId ?? null,
+      activeTabs: activeTabs.map((tab) => ({ id: tab.id, windowId: tab.windowId, lastAccessed: tab.lastAccessed || 0 }))
+    });
 
     let targetService;
+    let lastTargetId = null;
     if (command === "focus-target-a") {
       targetService = "targetA";
     } else if (command === "focus-target-b") {
       targetService = "targetB";
     } else if (command === "toggle-player") {
-      const { lastTargetId } = await chrome.storage.local.get("lastTargetId");
+      ({ lastTargetId } = await chrome.storage.local.get("lastTargetId"));
       targetService = chooseNextTargetId(
         activeTab,
         activeTabs,
@@ -162,6 +222,11 @@ async function handleCommand(command, _source = "command") {
     } else {
       return;
     }
+    await recordDiagnostic("switch.target-decision", {
+      target: targetService,
+      focusedActiveTabId: activeTab?.id ?? null,
+      lastTargetId
+    });
 
     const target = targets[targetService === "targetA" ? 0 : 1];
     const targetTab = chooseTab(
@@ -170,33 +235,69 @@ async function handleCommand(command, _source = "command") {
     );
 
     if (!targetTab) {
+      await recordDiagnostic("switch.target-missing", { target: targetService });
       await showProblem(`没有找到已打开的“${target.name}”页面`);
       return;
     }
+    await recordDiagnostic("switch.target-selected", {
+      target: targetService,
+      tabId: targetTab.id,
+      windowId: targetTab.windowId,
+      active: Boolean(targetTab.active),
+      focusedWindowId: focusedWindow.id
+    });
 
     // Pause other pages before switching, and again after the Space transition.
     // Some feed players react to visibility/focus changes by
     // resuming after an earlier pause request.
+    stage = "pause-before-focus";
     await pauseOtherTargetTabs(targetTabs, targetTab.id);
 
     // Activating the Chrome window is the extension API's available way to
     // ask macOS to show a window that belongs to another Space.
+    stage = "activate-tab";
     await chrome.tabs.update(targetTab.id, { active: true });
     const refreshedTargetTab = await chrome.tabs.get(targetTab.id);
+    stage = "focus-window";
     await chrome.windows.update(refreshedTargetTab.windowId, { focused: true });
     await chrome.storage.local.set({ lastTargetId: targetService });
+    await recordDiagnostic("switch.focus-requested", { target: targetService, tabId: targetTab.id, windowId: refreshedTargetTab.windowId });
 
     // macOS may still be animating to the target Space after the Chrome APIs
     // resolve. Let the page become foregrounded before asking its player to run.
     await new Promise((resolve) => setTimeout(resolve, 450));
+    let focusState = await readTargetFocus(targetTab.id, refreshedTargetTab.windowId);
+    await recordDiagnostic("switch.focus-check", { target: targetService, tabId: targetTab.id, ...focusState });
+    if (!focusState.confirmed) {
+      stage = "retry-focus-window";
+      await recordDiagnostic("switch.focus-retry", { target: targetService, tabId: targetTab.id, windowId: refreshedTargetTab.windowId });
+      await chrome.tabs.update(targetTab.id, { active: true });
+      await chrome.windows.update(refreshedTargetTab.windowId, { focused: true });
+      focusState = await waitForTargetFocus(targetTab.id, refreshedTargetTab.windowId, 900);
+      await recordDiagnostic("switch.focus-retry-result", { target: targetService, tabId: targetTab.id, ...focusState });
+    }
+    stage = "pause-after-focus";
     await pauseOtherTargetTabs(targetTabs, targetTab.id);
+    stage = "play-target";
     const playback = await controlTab(targetTab.id, "play");
+    await recordDiagnostic("switch.playback-result", { target: targetService, tabId: targetTab.id, state: playback.state });
     // A final sweep closes the race where the source page resumes while the
     // destination player is starting.
     await new Promise((resolve) => setTimeout(resolve, 200));
+    stage = "final-pause-check";
     const stillPlayingTabs = await pauseOtherTargetTabs(targetTabs, targetTab.id);
+    await recordDiagnostic("switch.completed", {
+      command,
+      source,
+      target: targetService,
+      tabId: targetTab.id,
+      elapsedMs: Date.now() - startedAt,
+      stillPlayingTabIds: stillPlayingTabs.map((tab) => tab.id)
+    });
     if (stillPlayingTabs.length > 0) {
       await showProblem("已切换，但另一配置页面的视频仍未暂停");
+    } else if (!focusState.confirmed) {
+      await showProblem("目标页已激活，但 Chrome 窗口未确认切到前台");
     } else if (playback.state === "playing") {
       await clearProblem();
     } else if (playback.state === "blocked") {
@@ -206,9 +307,35 @@ async function handleCommand(command, _source = "command") {
       await clearProblem();
     }
   } catch (error) {
+    await recordDiagnostic("switch.failed", { command, source, stage, elapsedMs: Date.now() - startedAt, error: errorText(error) });
     console.error("Could not switch video tabs", error);
     await showProblem("切换失败；请确认扩展有目标页面权限");
   }
+}
+
+async function readTargetFocus(tabId, windowId) {
+  try {
+    const focusedWindow = await chrome.windows.getLastFocused();
+    const [activeTab] = await chrome.tabs.query({ active: true, windowId });
+    return {
+      confirmed: focusedWindow.id === windowId && activeTab?.id === tabId,
+      focusedWindowId: focusedWindow.id,
+      activeTabId: activeTab?.id ?? null
+    };
+  } catch (error) {
+    return { confirmed: false, error: errorText(error) };
+  }
+}
+
+async function waitForTargetFocus(tabId, windowId, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let state;
+  do {
+    state = await readTargetFocus(tabId, windowId);
+    if (state.confirmed || Date.now() >= deadline) return state;
+    await new Promise((resolve) => setTimeout(resolve, 150));
+  } while (Date.now() < deadline);
+  return state;
 }
 
 function chooseNextTargetId(
@@ -229,17 +356,17 @@ function chooseNextTargetId(
     : null;
   if (focusedTargetId) return nextTarget(focusedTargetId);
 
+  // Each Chrome window can have an active tab, and lastAccessed can lag while
+  // macOS is switching Spaces. Prefer our last successful target in that case.
+  if (lastTargetId === "targetA" || lastTargetId === "targetB") {
+    return nextTarget(lastTargetId);
+  }
+
   const recentActiveTarget = [...(activeTabs || [])]
     .sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))
     .map((tab) => targetForTab(tab.id))
     .find(Boolean);
   if (recentActiveTarget) return nextTarget(recentActiveTarget);
-
-  // Chrome may briefly return no active tab while macOS is moving between
-  // Spaces. Prefer the last successfully focused target over guessing A.
-  if (lastTargetId === "targetA" || lastTargetId === "targetB") {
-    return nextTarget(lastTargetId);
-  }
 
   const mostRecentlyAccessedTarget = targetTabs
     .flatMap(({ id, tabs }) => tabs.map((tab) => ({
@@ -258,13 +385,36 @@ async function pauseOtherTargetTabs(targetTabs, keepTabId) {
   const results = await Promise.all(otherTabs.map(async (tab) => {
     try {
       const result = await controlTab(tab.id, "pause");
+      if (result.state === "still-playing") {
+        await recordDiagnostic("video.pause-incomplete", { tabId: tab.id, keepTabId });
+      }
       return result.state === "still-playing" ? tab : null;
     } catch (error) {
+      await recordDiagnostic("video.pause-error", { tabId: tab.id, error: errorText(error) });
       console.warn("Could not pause video tab", tab.id, error);
       return tab;
     }
   }));
   return results.filter(Boolean);
+}
+
+function errorText(error) {
+  return error?.message || String(error);
+}
+
+function recordDiagnostic(event, details = {}) {
+  return debugModeReady.then(() => {
+    if (!debugMode) return;
+    const entry = { time: new Date().toISOString(), event, ...details };
+    diagnosticWriteQueue = diagnosticWriteQueue
+      .catch(() => {})
+      .then(async () => {
+        const { [DIAGNOSTIC_LOG_KEY]: logs = [] } = await chrome.storage.local.get(DIAGNOSTIC_LOG_KEY);
+        await chrome.storage.local.set({ [DIAGNOSTIC_LOG_KEY]: [...logs, entry].slice(-MAX_DIAGNOSTIC_LOGS) });
+      })
+      .catch((error) => console.warn("Could not save diagnostic log", error));
+    return diagnosticWriteQueue;
+  });
 }
 
 async function readSettings() {

@@ -11,6 +11,13 @@ const fields = {
   targetBPattern: document.querySelector("#targetBPattern"),
   globalHotkey: document.querySelector("#globalHotkey"),
   nativeStatus: document.querySelector("#nativeStatus"),
+  debugMode: document.querySelector("#debugMode"),
+  debugModeStatus: document.querySelector("#debugModeStatus"),
+  diagnosticLogs: document.querySelector("#diagnosticLogs"),
+  diagnosticStatus: document.querySelector("#diagnosticStatus"),
+  refreshDiagnostics: document.querySelector("#refreshDiagnostics"),
+  copyDiagnostics: document.querySelector("#copyDiagnostics"),
+  clearDiagnostics: document.querySelector("#clearDiagnostics"),
   save: document.querySelector("#save"),
   message: document.querySelector("#message")
 };
@@ -22,8 +29,83 @@ document.addEventListener("DOMContentLoaded", () => {
     fields.nativeStatus.textContent = "请按下新的组合键…";
   });
   fields.save.addEventListener("click", () => void saveSettings());
+  fields.refreshDiagnostics.addEventListener("click", () => void loadDiagnosticLogs());
+  fields.copyDiagnostics.addEventListener("click", () => void copyDiagnosticLogs());
+  fields.clearDiagnostics.addEventListener("click", () => void clearDiagnosticLogs());
+  fields.debugMode.addEventListener("change", () => void saveDebugMode());
   void updateNativeStatus();
+  void loadDebugMode();
+  void loadDiagnosticLogs();
 });
+
+async function loadDebugMode() {
+  try {
+    const result = await chrome.runtime.sendMessage({ type: "getDebugMode" });
+    fields.debugMode.checked = Boolean(result?.enabled);
+    fields.debugModeStatus.textContent = result?.enabled
+      ? "正在收集调试日志"
+      : "已关闭；不会记录新的调试日志";
+  } catch (error) {
+    fields.debugModeStatus.textContent = `读取状态失败：${error.message || error}`;
+  }
+}
+
+async function saveDebugMode() {
+  fields.debugMode.disabled = true;
+  try {
+    const result = await chrome.runtime.sendMessage({
+      type: "setDebugMode",
+      enabled: fields.debugMode.checked
+    });
+    if (result?.error) throw new Error(result.error);
+    fields.debugModeStatus.textContent = result.enabled
+      ? "正在收集调试日志"
+      : "已关闭；不会记录新的调试日志";
+    await loadDiagnosticLogs();
+  } catch (error) {
+    fields.debugMode.checked = !fields.debugMode.checked;
+    fields.debugModeStatus.textContent = `保存状态失败：${error.message || error}`;
+  } finally {
+    fields.debugMode.disabled = false;
+  }
+}
+
+async function loadDiagnosticLogs() {
+  try {
+    const result = await chrome.runtime.sendMessage({ type: "getDiagnosticLogs" });
+    if (result?.error) throw new Error(result.error);
+    const logs = result?.logs || [];
+    fields.diagnosticLogs.value = logs.map((entry) =>
+      `${entry.time} ${entry.event} ${JSON.stringify(entry, (key, value) => key === "time" || key === "event" ? undefined : value)}`
+    ).join("\n");
+    fields.diagnosticStatus.textContent = `${logs.length} 条记录`;
+    fields.diagnosticLogs.scrollTop = fields.diagnosticLogs.scrollHeight;
+  } catch (error) {
+    fields.diagnosticStatus.textContent = `读取记录失败：${error.message || error}`;
+  }
+}
+
+async function copyDiagnosticLogs() {
+  try {
+    await navigator.clipboard.writeText(fields.diagnosticLogs.value);
+    fields.diagnosticStatus.textContent = "诊断记录已复制";
+  } catch {
+    fields.diagnosticLogs.focus();
+    fields.diagnosticLogs.select();
+    fields.diagnosticStatus.textContent = "无法自动复制；记录已选中，请手动复制";
+  }
+}
+
+async function clearDiagnosticLogs() {
+  try {
+    const result = await chrome.runtime.sendMessage({ type: "clearDiagnosticLogs" });
+    if (result?.error) throw new Error(result.error);
+    fields.diagnosticLogs.value = "";
+    fields.diagnosticStatus.textContent = "记录已清空";
+  } catch (error) {
+    fields.diagnosticStatus.textContent = `清空失败：${error.message || error}`;
+  }
+}
 
 async function loadSettings() {
   const { switchSettings } = await chrome.storage.sync.get("switchSettings");

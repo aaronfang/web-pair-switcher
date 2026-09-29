@@ -8,13 +8,14 @@ const workerPath = path.join(__dirname, "..", "service-worker.js");
 const workerSource = fs.readFileSync(workerPath, "utf8");
 
 function createWorkerContext() {
+  const localData = {};
   const context = vm.createContext({
     setTimeout,
     chrome: {
       runtime: {
         onInstalled: { addListener() {} },
         onStartup: { addListener() {} },
-        onMessage: { addListener() {} },
+        onMessage: { addListener(listener) { context.runtimeMessageListener = listener; } },
         connectNative() {
           return {
             onMessage: { addListener() {} },
@@ -27,7 +28,11 @@ function createWorkerContext() {
       alarms: { create() {}, onAlarm: { addListener() {} } },
       storage: {
         sync: { get: async () => ({}) },
-        local: { get: async () => ({}) }
+        local: {
+          get: async (key) => key ? { [key]: localData[key] } : { ...localData },
+          set: async (values) => Object.assign(localData, values),
+          remove: async (key) => { delete localData[key]; }
+        }
       }
     }
   });
@@ -35,7 +40,7 @@ function createWorkerContext() {
   return context;
 }
 
-function createSwitchHarness() {
+function createSwitchHarness({ focusFailures = 0 } = {}) {
   const events = [];
   let focusedWindowId = 1;
   const tabs = [
@@ -82,8 +87,12 @@ function createSwitchHarness() {
       windows: {
         getLastFocused: async () => ({ id: focusedWindowId }),
         update: async (windowId) => {
-          focusedWindowId = windowId;
           events.push({ type: "focus", windowId });
+          if (focusFailures > 0) {
+            focusFailures -= 1;
+          } else {
+            focusedWindowId = windowId;
+          }
         }
       },
       tabs: {
@@ -149,6 +158,25 @@ test("the focused page wins over a stale last-target value", () => {
   );
 });
 
+test("last successful target wins over stale active tabs when the focused tab is unrelated", () => {
+  const context = createWorkerContext();
+  const targets = [
+    { id: "targetA", tabs: [{ id: 10, lastAccessed: 100 }] },
+    { id: "targetB", tabs: [{ id: 20, lastAccessed: 200 }] }
+  ];
+
+  assert.equal(
+    context.chooseNextTargetId(
+      { id: 99, windowId: 1 },
+      [{ id: 20, windowId: 2, lastAccessed: 200 }, { id: 10, windowId: 3, lastAccessed: 100 }],
+      targets,
+      1,
+      "targetA"
+    ),
+    "targetB"
+  );
+});
+
 test("switching to B pauses A again after the target window is focused", async () => {
   const { context, events } = createSwitchHarness();
 
@@ -164,6 +192,17 @@ test("switching to B pauses A again after the target window is focused", async (
     `The source page should be paused after focus changes: ${JSON.stringify(events)}`
   );
   assert.ok(events.some((event) => event.type === "play" && event.tabId === 20));
+});
+
+test("a missed window focus is detected and retried", async () => {
+  const { context, events } = createSwitchHarness({ focusFailures: 1 });
+
+  await context.handleCommand("toggle-player");
+
+  assert.deepEqual(
+    events.filter((event) => event.type === "focus").map((event) => event.windowId),
+    [2, 2]
+  );
 });
 
 test("rapid right-Option presses queue two switches instead of dropping one", async () => {
@@ -192,4 +231,51 @@ test("a Chrome command duplicate is deduplicated against the native event", () =
 
   assert.equal(calls.length, 1);
   assert.equal(calls[0].source, "native-hotkey");
+});
+
+test("diagnostic logs persist locally and retain only the newest 300 entries", async () => {
+  const context = createWorkerContext();
+  await new Promise((resolve) => {
+    context.runtimeMessageListener({ type: "setDebugMode", enabled: true }, {}, resolve);
+  });
+
+  for (let index = 0; index < 305; index += 1) {
+    await context.recordDiagnostic("test.event", { index });
+  }
+
+  const response = await new Promise((resolve) => {
+    context.runtimeMessageListener({ type: "getDiagnosticLogs" }, {}, resolve);
+  });
+  assert.equal(response.logs.length, 300);
+  assert.equal(response.logs[0].index, 5);
+  assert.equal(response.logs.at(-1).index, 304);
+
+  await new Promise((resolve) => {
+    context.runtimeMessageListener({ type: "clearDiagnosticLogs" }, {}, resolve);
+  });
+  const cleared = await new Promise((resolve) => {
+    context.runtimeMessageListener({ type: "getDiagnosticLogs" }, {}, resolve);
+  });
+  assert.equal(cleared.logs.length, 0);
+});
+
+test("diagnostics are disabled by default and follow the persisted debug setting", async () => {
+  const context = createWorkerContext();
+
+  await context.recordDiagnostic("ignored.event");
+  assert.equal((await context.chrome.storage.local.get("diagnosticLogs")).diagnosticLogs, undefined);
+
+  const setDebugMode = (enabled) => new Promise((resolve) => {
+    context.runtimeMessageListener({ type: "setDebugMode", enabled }, {}, resolve);
+  });
+  await setDebugMode(true);
+  await context.recordDiagnostic("captured.event");
+  await setDebugMode(false);
+  await context.recordDiagnostic("ignored.after-disable");
+
+  const { diagnosticLogs } = await context.chrome.storage.local.get("diagnosticLogs");
+  assert.equal(Array.from(diagnosticLogs, ({ event }) => event).join(","), "debug.enabled,captured.event");
+  assert.equal((await new Promise((resolve) => {
+    context.runtimeMessageListener({ type: "getDebugMode" }, {}, resolve);
+  })).enabled, false);
 });

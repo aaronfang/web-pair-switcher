@@ -46,6 +46,12 @@ Chrome 需要保持打开；Chrome 窗口可以在后台，甚至位于另一个
 
 扩展会通过 Chrome API 聚焦目标标签所在的窗口，但 Chrome 扩展和 Native Messaging 都没有直接操作 Mission Control 的 API。是否自动跳到目标窗口所在 Space 由 macOS 的窗口切换设置决定；如果没有切换，请检查“系统设置 → 桌面与程序坞 → Mission Control”中的相关选项，并确认两个 Chrome 窗口确实位于不同 Space。
 
+## 设置与诊断记录
+
+点击扩展图标即可打开设置，切换页面和快捷键设置不必进入扩展管理器；也可以从扩展详情页打开独立选项页。
+
+调试日志默认关闭。需要排查问题时，在设置中打开“收集调试日志”；此后才会记录最近 300 条快捷键和切换流程事件，Service Worker 重启后仍可查看。开始测试前可先清空记录；复现几次后点击“刷新”和“复制记录”，把记录发给我分析。日志包含事件时间、来源、目标 tab/window ID、执行阶段和错误，不记录页面 URL 或页面内容。若完全没有 `native.message` 的 `hotkey` 事件，扩展侧无法判断耳机/键盘事件是否到达 macOS Native Host；但 `native.connected` 和 `native.message` 中的配置状态可用于确认助手是否已连接并注册快捷键。
+
 ## 故障排查
 
 - 扩展选项页显示“macOS 常驻助手未连接”：重新运行 `native-host/install-native-host.sh`，然后在 `chrome://extensions` 点击扩展的重新加载。安装脚本必须显示 `Native host installation verified`。
