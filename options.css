@@ -1,0 +1,55 @@
+:root {
+  color-scheme: light dark;
+  font: -apple-system-body, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+}
+
+body {
+  margin: 0;
+  background: #f5f5f7;
+  color: #1d1d1f;
+}
+
+.page {
+  box-sizing: border-box;
+  width: min(760px, 100%);
+  margin: 0 auto;
+  padding: 40px 24px 56px;
+}
+
+h1 { margin: 0 0 8px; font-size: 28px; }
+h2 { margin: 0 0 18px; font-size: 18px; }
+.intro, .help, .note { line-height: 1.55; color: #6e6e73; }
+.card, .note {
+  margin-top: 20px;
+  padding: 22px;
+  border: 1px solid #d2d2d7;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .78);
+}
+label { display: grid; gap: 8px; margin-top: 16px; font-weight: 600; }
+input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #a1a1a6;
+  border-radius: 8px;
+  background: #fff;
+  color: inherit;
+  font: inherit;
+}
+.actions { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; margin-top: 26px; }
+button { padding: 10px 16px; border: 0; border-radius: 9px; background: #0071e3; color: white; font: inherit; font-weight: 600; cursor: pointer; }
+a { color: #06c; }
+.message, .status { min-height: 1.4em; }
+.message { color: #176b2c; }
+.message.error { color: #c62828; }
+.status { color: #6e6e73; font-size: 13px; }
+.note { display: grid; gap: 8px; font-size: 13px; }
+code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+@media (prefers-color-scheme: dark) {
+  body { background: #1d1d1f; color: #f5f5f7; }
+  .card, .note { border-color: #424245; background: #2c2c2e; }
+  input { border-color: #636366; background: #1d1d1f; }
+  .intro, .help, .note, .status { color: #a1a1a6; }
+}

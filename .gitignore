@@ -1,0 +1,6 @@
+.DS_Store
+.build/
+native-host/.build/
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/

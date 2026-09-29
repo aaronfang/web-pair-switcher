@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>网页双页切换器设置</title>
+    <link rel="stylesheet" href="options.css">
+  </head>
+  <body>
+    <main class="page">
+      <h1>页面切换设置</h1>
+      <p class="intro">快捷键会在两个匹配到的 Chrome 页面之间切换，播放目标页并暂停另一页。名称只是显示用，可以改成任意网站。</p>
+
+      <section class="card">
+        <h2>页面 A</h2>
+        <label>
+          显示名称
+          <input id="targetAName" type="text" autocomplete="off">
+        </label>
+        <label>
+          URL 匹配规则
+          <input id="targetAPattern" type="text" spellcheck="false" placeholder="例如 https://example.com/video/*">
+        </label>
+      </section>
+
+      <section class="card">
+        <h2>页面 B</h2>
+        <label>
+          显示名称
+          <input id="targetBName" type="text" autocomplete="off">
+        </label>
+        <label>
+          URL 匹配规则
+          <input id="targetBPattern" type="text" spellcheck="false" placeholder="例如 https://another.example/*">
+        </label>
+      </section>
+
+      <section class="card">
+        <h2>全局快捷键</h2>
+        <p class="help">点击输入框后按组合键，例如 <code>⌥⇧Y</code>；也可以只按一下右侧 Option，将它设为专用切换键。左侧 Option 单独按下不会触发。</p>
+        <label>
+          全局快捷键
+          <input id="globalHotkey" type="text" readonly autocomplete="off" aria-label="全局快捷键">
+        </label>
+        <p id="nativeStatus" class="status"></p>
+      </section>
+
+      <div class="actions">
+        <button id="save" type="button">保存设置并请求网页权限</button>
+        <a href="chrome://extensions/shortcuts" target="_blank" rel="noreferrer">设置 Chrome 内部快捷键</a>
+      </div>
+      <p id="message" class="message" role="status"></p>
+
+      <section class="note">
+        <strong>匹配规则示例</strong>
+        <code>*://*.douyin.com/*</code>
+        <code>https://www.bilibili.com/video/*</code>
+        <code>https://example.com/watch*</code>
+        <span>首次保存时 Chrome 会请求访问这些页面的权限。</span>
+      </section>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>

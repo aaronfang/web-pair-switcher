@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "网页双页切换器",
+  "version": "1.3.0",
+  "description": "用全局快捷键在两个自定义网页之间切换，并自动暂停另一边。",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA5rM0D5ONBYUN8PU4QRlAStn51Hgz85Z8AeCwRwYjNgWOllpKRiB3dh7EaNLb0FyT/uorq2kZqFGf7RCNvlZysRYBaT/ePpV+M5dLd0jq2wDhPFYYtJwaS85YhNgZip+koIw6rIpzxiMp0x9Hsak3wNK013YiXrElpuroNZvbnGA/pyTBvRr0pImGBlgQ5CetoDDP7RCXtkwmlm2YgB0rKP8MuZhactg7+cJHu7GXWBdUngGkWvT0RSuAb11qwA9RkVsYsGSCdlRsjbZ7Jd235sWOgTVFhk32d92p5miONBfp+UmDbjL2k3XQmqOw13ALI9Lkw5nr0ATubQ0wceLomwIDAQAB",
+  "permissions": ["scripting", "storage", "nativeMessaging", "alarms"],
+  "host_permissions": ["*://*.douyin.com/*", "*://*.bilibili.com/*", "*://b23.tv/*"],
+  "optional_host_permissions": ["*://*/*", "file:///*"],
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "options_page": "options.html",
+  "commands": {
+    "toggle-player": {
+      "suggested_key": {
+        "default": "Alt+Shift+Y",
+        "mac": "Alt+Shift+Y"
+      },
+      "description": "在页面 A 和页面 B 之间切换并播放"
+    },
+    "focus-target-a": {
+      "description": "切换到页面 A 并播放"
+    },
+    "focus-target-b": {
+      "description": "切换到页面 B 并播放"
+    }
+  },
+  "action": {
+    "default_title": "网页双页切换器"
+  }
+}
