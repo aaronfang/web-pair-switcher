@@ -44,7 +44,9 @@ Chrome 需要保持打开；Chrome 窗口可以在后台，甚至位于另一个
 
 ## macOS Spaces 说明
 
-扩展会通过 Chrome API 聚焦目标标签所在的窗口，但 Chrome 扩展和 Native Messaging 都没有直接操作 Mission Control 的 API。是否自动跳到目标窗口所在 Space 由 macOS 的窗口切换设置决定；如果没有切换，请检查“系统设置 → 桌面与程序坞 → Mission Control”中的相关选项，并确认两个 Chrome 窗口确实位于不同 Space。
+扩展会通过 Chrome API 请求聚焦目标标签所在的窗口，但 Chrome 扩展和 Native Messaging 都没有直接操作 Mission Control 或强制切换 Space 的 API。因此，两个 Chrome 窗口位于同一个 Space 时通常可以稳定切换；位于不同 Space 时，macOS 可能只激活目标标签页，却不把目标窗口所在的 Space 切到前台，跨 Space 切换无法由扩展保证每次成功。
+
+如果跨 Space 切换不稳定，请检查“系统设置 → 桌面与程序坞 → Mission Control”中的窗口切换设置，并确认两个 Chrome 窗口没有处于全屏独占 Space。扩展会验证目标窗口是否真的成为前台窗口；验证失败时不会继续播放目标页，也不会把这次操作当作成功。需要最高可靠性时，请将两个窗口放在同一个 Space。
 
 ## 设置与诊断记录
 

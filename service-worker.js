@@ -247,35 +247,24 @@ async function handleCommand(command, source = "command") {
       focusedWindowId: focusedWindow.id
     });
 
-    // Pause other pages before switching, and again after the Space transition.
-    // Some feed players react to visibility/focus changes by
-    // resuming after an earlier pause request.
-    stage = "pause-before-focus";
-    await pauseOtherTargetTabs(targetTabs, targetTab.id);
-
-    // Activating the Chrome window is the extension API's available way to
-    // ask macOS to show a window that belongs to another Space.
-    stage = "activate-tab";
-    await chrome.tabs.update(targetTab.id, { active: true });
+    // Request the visual switch before doing any video work. This is the
+    // boss-key path: hiding the current page has priority over pausing it.
     const refreshedTargetTab = await chrome.tabs.get(targetTab.id);
     stage = "focus-window";
-    await chrome.windows.update(refreshedTargetTab.windowId, { focused: true });
-    await chrome.storage.local.set({ lastTargetId: targetService });
-    await recordDiagnostic("switch.focus-requested", { target: targetService, tabId: targetTab.id, windowId: refreshedTargetTab.windowId });
-
-    // macOS may still be animating to the target Space after the Chrome APIs
-    // resolve. Let the page become foregrounded before asking its player to run.
-    await new Promise((resolve) => setTimeout(resolve, 450));
-    let focusState = await readTargetFocus(targetTab.id, refreshedTargetTab.windowId);
-    await recordDiagnostic("switch.focus-check", { target: targetService, tabId: targetTab.id, ...focusState });
+    const focusState = await focusTargetWindow(targetTab.id, refreshedTargetTab.windowId, targetService);
     if (!focusState.confirmed) {
-      stage = "retry-focus-window";
-      await recordDiagnostic("switch.focus-retry", { target: targetService, tabId: targetTab.id, windowId: refreshedTargetTab.windowId });
-      await chrome.tabs.update(targetTab.id, { active: true });
-      await chrome.windows.update(refreshedTargetTab.windowId, { focused: true });
-      focusState = await waitForTargetFocus(targetTab.id, refreshedTargetTab.windowId, 900);
-      await recordDiagnostic("switch.focus-retry-result", { target: targetService, tabId: targetTab.id, ...focusState });
+      await recordDiagnostic("switch.focus-failed", {
+        target: targetService,
+        tabId: targetTab.id,
+        windowId: refreshedTargetTab.windowId,
+        focusedWindowId: focusState.focusedWindowId,
+        activeTabId: focusState.activeTabId,
+        attempts: focusState.attempts
+      });
+      await showProblem("目标窗口未能切到前台；请检查 macOS 的 Space 设置后重试");
+      return;
     }
+    await chrome.storage.local.set({ lastTargetId: targetService });
     stage = "pause-after-focus";
     await pauseOtherTargetTabs(targetTabs, targetTab.id);
     stage = "play-target";
@@ -296,8 +285,6 @@ async function handleCommand(command, source = "command") {
     });
     if (stillPlayingTabs.length > 0) {
       await showProblem("已切换，但另一配置页面的视频仍未暂停");
-    } else if (!focusState.confirmed) {
-      await showProblem("目标页已激活，但 Chrome 窗口未确认切到前台");
     } else if (playback.state === "playing") {
       await clearProblem();
     } else if (playback.state === "blocked") {
@@ -327,14 +314,31 @@ async function readTargetFocus(tabId, windowId) {
   }
 }
 
-async function waitForTargetFocus(tabId, windowId, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  let state;
-  do {
+async function focusTargetWindow(tabId, windowId, target) {
+  const maxAttempts = 8;
+  let state = { confirmed: false, focusedWindowId: null, activeTabId: null };
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    await recordDiagnostic(attempt === 1 ? "switch.focus-requested" : "switch.focus-retry", {
+      target, tabId, windowId, attempt
+    });
+    try {
+      // Repeat both operations because macOS may accept the Chrome API call
+      // while the Space transition is still pending.
+      await chrome.windows.update(windowId, { focused: true });
+      await chrome.tabs.update(tabId, { active: true });
+    } catch (error) {
+      state = { ...state, error: errorText(error), attempts: attempt };
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      continue;
+    }
+    await new Promise((resolve) => setTimeout(resolve, attempt === 1 ? 350 : 300));
     state = await readTargetFocus(tabId, windowId);
-    if (state.confirmed || Date.now() >= deadline) return state;
-    await new Promise((resolve) => setTimeout(resolve, 150));
-  } while (Date.now() < deadline);
+    state.attempts = attempt;
+    await recordDiagnostic(attempt === 1 ? "switch.focus-check" : "switch.focus-retry-result", {
+      target, tabId, ...state
+    });
+    if (state.confirmed) return state;
+  }
   return state;
 }
 

@@ -194,6 +194,17 @@ test("switching to B pauses A again after the target window is focused", async (
   assert.ok(events.some((event) => event.type === "play" && event.tabId === 20));
 });
 
+test("the visual switch is requested before pausing the previous page", async () => {
+  const { context, events } = createSwitchHarness();
+
+  await context.handleCommand("toggle-player");
+
+  const firstFocus = events.findIndex((event) => event.type === "focus");
+  const firstPause = events.findIndex((event) => event.type === "pause");
+  assert.ok(firstFocus >= 0);
+  assert.ok(firstPause > firstFocus, `focus should happen before pause: ${JSON.stringify(events)}`);
+});
+
 test("a missed window focus is detected and retried", async () => {
   const { context, events } = createSwitchHarness({ focusFailures: 1 });
 
@@ -203,6 +214,15 @@ test("a missed window focus is detected and retried", async () => {
     events.filter((event) => event.type === "focus").map((event) => event.windowId),
     [2, 2]
   );
+});
+
+test("a window that never focuses does not start playback or claim success", async () => {
+  const { context, events } = createSwitchHarness({ focusFailures: 20 });
+
+  await context.handleCommand("toggle-player");
+
+  assert.equal(events.some((event) => event.type === "play"), false);
+  assert.equal(events.filter((event) => event.type === "focus").length, 8);
 });
 
 test("rapid right-Option presses queue two switches instead of dropping one", async () => {
